@@ -18,21 +18,23 @@ YubiKey hardware security
 
 ## Example Signature file (.sig)
 ```
-Author: Ch1ffr3punk  
-Signed at: 2026-03-09 05:59:14 +0000  
-Filename: yubisigner-windows-amd64.exe  
-File size: 25772544 bytes  
-Email: ch1ffr3punk@gmail.com  
-URL: https://oc2mx.net  
-  RIPEMD-256: 1222d3136827f139a4e7673e171b63fb6de20e2c48d44a257302cd5b70f84c91  
-     SHA-256: 07475119d6fc9d85527141267eab6c981dd365993d575b99796f481033951371  
-         SM3: dcca6112ce3096ea72565efee5a454e64cd4ae4be015162630a0aa21ec9e305f  
-Streebog-256: 60e69090e25875bd063def008cb4287e848f4908219479e1c76dc46f0844ca4d  
------BEGIN YUBISIGNER ED25519 SIGNATURE-----  
-8a5f8adfec9690b8ae6ca95dc23811463fcce5bbba0d841f49b7d3f7a89ad149  
-04f33554f89d956fce08b6beb7249d67ca87fa495ce4c5c3a0d094842242c78a  
-4f36a1dff914ae261f470eeafc02469e44a527acc5bddc60e7c163ab357a4206  
------END YUBISIGNER ED25519 SIGNATURE-----  
+Author: Ch1ffr3punk
+Signed at: 2026-03-10 17:04:52 +0000
+Filename: yubisigner-windows-amd64.exe
+File size: 25783808 bytes
+Email: ch1ffr3punk@gmail.com
+Telefax: n/a
+URL: https://oc2mx.net
+Comment: Release v0.1.1
+  RIPEMD-256: d802a088c5630f68938954d53d4598f22b013f6312dbb60df51610073011fbeb
+     SHA-256: f0bed5fe9e6d39d9ae6d6f8bdc6dafc6e2e6d9e25fea6a2eac994c48751bfe04
+         SM3: 72a5136ee9d45595d6dc6934c9f4b17082f8328d2ba49359c5355df024d8deee
+Streebog-256: 31c50403a17acb7ec4912acffb573dc0a3edaa3cf901d08f1d655591368d6c95
+-----BEGIN YUBISIGNER ED25519 SIGNATURE-----
+8a5f8adfec9690b8ae6ca95dc23811463fcce5bbba0d841f49b7d3f7a89ad149
+c5d2c9dc1698cd93f22c4cb37c9122fbc529df810bafc2c3f3da1d4893df03ed
+24ab15e151552fa4e6d42a6902eceef69a8a38523803a7208fdd8e7c57af3e03
+-----END YUBISIGNER ED25519 SIGNATURE-----
 ```
 ![yubisigner](img/1.png)
 
@@ -48,4 +50,5 @@ XMR: 45TJx8ZHngM4GuNfYxRw7R7vRyFgfMVp862JqycMrPmyfTfJAYcQGEzT27wL1z5RG1b5XfRPJk9
 <a href="https://www.buymeacoffee.com/Ch1ffr3punk" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-yellow.png" alt="Buy Me A Coffee" height="41" width="174"></a>
 
 yubisigner is dedicated to Alice and Bob.  
+
 
