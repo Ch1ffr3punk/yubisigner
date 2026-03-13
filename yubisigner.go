@@ -39,6 +39,19 @@ import (
 	"github.com/tjfoc/gmsm/sm3"
 )
 
+// MerkleTree node structure
+type MerkleNode struct {
+	Hash  string
+	Left  *MerkleNode
+	Right *MerkleNode
+}
+
+// File hash entry for Merkle tree
+type FileHashEntry struct {
+	Path string
+	Hash string
+}
+
 // Signature metadata structure
 type SignatureMetadata struct {
 	Author    string
@@ -139,7 +152,7 @@ func main() {
 		fileSelected:   false,
 	}
 	gui.window = gui.app.NewWindow("yubisigner")
-	gui.window.Resize(fyne.NewSize(550, 480)) // Height increased for new fields
+	gui.window.Resize(fyne.NewSize(600, 520))
 	gui.createUI()
 	gui.applyTheme()
 	gui.window.SetContent(gui.createMainUI())
@@ -164,7 +177,7 @@ func (g *GUI) createUI() {
 	g.emailEntry.SetPlaceHolder("optional")
 	g.emailEntry.Validator = func(s string) error {
 		if s == "" {
-			return nil // Empty is OK (will become "n/a")
+			return nil
 		}
 		if !emailRegex.MatchString(s) {
 			return fmt.Errorf("invalid email format")
@@ -181,7 +194,7 @@ func (g *GUI) createUI() {
 	g.telefaxEntry.SetPlaceHolder("optional")
 	g.telefaxEntry.Validator = func(s string) error {
 		if s == "" {
-			return nil // Empty is OK (will become "n/a")
+			return nil
 		}
 		if !strings.HasPrefix(s, "+") {
 			return fmt.Errorf("Telefax must start with '+' for international format")
@@ -243,22 +256,30 @@ func (g *GUI) createUI() {
 	g.infoBtn = widget.NewButtonWithIcon("", theme.InfoIcon(), g.showInfoPopup)
 }
 
-// createMainUI builds the main layout
+// createMainUI builds the main layout - WITH CMT and VMT buttons
 func (g *GUI) createMainUI() fyne.CanvasObject {
-	// Buttons
+	// Buttons - now with CMT and VMT
 	signBtn := widget.NewButton("Sign", g.onSignClick)
 	signBtn.Importance = widget.HighImportance
+	
 	verifyBtn := widget.NewButton("Verify", g.onVerifyClick)
 	verifyBtn.Importance = widget.HighImportance
-	selectFileBtn := widget.NewButton("Select File", g.onSelectFile)
-	selectFileBtn.Importance = widget.MediumImportance
+	
+	cmtBtn := widget.NewButton("CMT", g.onCreateMerkleTree)
+	cmtBtn.Importance = widget.HighImportance
+	
+	vmtBtn := widget.NewButton("VMT", g.onVerifyMerkleTree)
+	vmtBtn.Importance = widget.HighImportance
 
-	// All three buttons centered
+	// All four buttons centered in one row
 	buttonContainer := container.NewCenter(
-		container.NewHBox(
-			selectFileBtn,
-			signBtn,
-			verifyBtn,
+		container.NewVBox(
+			container.NewHBox(
+				signBtn,
+				verifyBtn,
+				cmtBtn,
+				vmtBtn,
+			),
 		),
 	)
 
@@ -358,20 +379,22 @@ func (g *GUI) applyTheme() {
 	}
 }
 
-// show info pop-up
-func (g *GUI) showInfoPopup() {
+// showInfoPopup
+func (n *GUI) showInfoPopup() {
 	projURL, _ := url.Parse("https://github.com/Ch1ffr3punk/yubisigner")
 	
 	projectLink := widget.NewHyperlink("An Open Source project", projURL)
 	
 	okButton := widget.NewButton("OK", func() {
-		// Dialog schließen
-		g.window.Canvas().Overlays().Remove(g.window.Canvas().Overlays().Top())
+		overlays := n.window.Canvas().Overlays()
+		if overlays.Top() != nil {
+			overlays.Remove(overlays.Top())
+		}
 	})
 	okButton.Importance = widget.HighImportance
 	
 	content := container.NewVBox(
-		widget.NewLabelWithStyle("yubisigner v0.1.1", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("yubisigner v0.1.2", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 		widget.NewSeparator(),
 		container.NewHBox(
 			layout.NewSpacer(),
@@ -388,7 +411,7 @@ func (g *GUI) showInfoPopup() {
 		),
 	)
 
-	dialog.ShowCustom("", "", content, g.window)
+	dialog.ShowCustomWithoutButtons("", content, n.window)
 }
 
 // selectFile opens file dialog (modal)
@@ -428,15 +451,33 @@ func (g *GUI) selectFile(callback func()) {
 			callback()
 		}
 	}, g.window)
-	// Make modal (stays in foreground)
 	dialog.Show()
 }
 
-// onSelectFile - just select file
-func (g *GUI) onSelectFile() {
-	g.selectFile(func() {
-		g.statusLabel.SetText("File selected. Click Sign to sign or Verify to verify.")
-	})
+// selectDirectory opens directory dialog for Merkle tree operations
+func (g *GUI) selectDirectory(callback func(string)) {
+	dialog := dialog.NewFolderOpen(func(list fyne.ListableURI, err error) {
+		if err != nil {
+			g.statusLabel.SetText("Error selecting directory: " + err.Error())
+			return
+		}
+		if list == nil {
+			return
+		}
+		dirPath := list.Path()
+		g.filenameLabel.SetText(filepath.Base(dirPath) + "/")
+		g.currentFile = dirPath
+		g.fileSelected = true
+		g.filesizeLabel.SetText("Directory")
+		g.filesizeLabel.Show()
+		g.statusLabel.SetText(fmt.Sprintf("Selected directory: %s", filepath.Base(dirPath)))
+		g.sigDisplay.SetText("")
+		
+		if callback != nil {
+			callback(dirPath)
+		}
+	}, g.window)
+	dialog.Show()
 }
 
 // showPinDialog shows a modal PIN dialog
@@ -481,7 +522,7 @@ func ensureUTF8(s string) string {
 // validateEmail checks RFC 5322 compliant email format
 func validateEmail(email string) error {
 	if email == "" {
-		return nil // Empty is OK (will become "n/a")
+		return nil
 	}
 	if !emailRegex.MatchString(email) {
 		return fmt.Errorf("invalid email format")
@@ -492,7 +533,7 @@ func validateEmail(email string) error {
 // validateTelefax checks international fax format (must start with '+')
 func validateTelefax(telefax string) error {
 	if telefax == "" {
-		return nil // Empty is OK (will become "n/a")
+		return nil
 	}
 	if !strings.HasPrefix(telefax, "+") {
 		return fmt.Errorf("Telefax must start with '+' for international format")
@@ -500,9 +541,484 @@ func validateTelefax(telefax string) error {
 	return nil
 }
 
-// onSignClick - hybrid approach with progress feedback
+// onCreateMerkleTree handles the Create Merkle Tree button
+func (g *GUI) onCreateMerkleTree() {
+	// Select directory first
+	g.selectDirectory(func(dirPath string) {
+		g.continueCreateMerkleTree(dirPath)
+	})
+}
+
+// continueCreateMerkleTree continues Merkle tree creation after directory selection
+func (g *GUI) continueCreateMerkleTree(dirPath string) {
+	g.statusLabel.SetText(fmt.Sprintf("Creating Merkle tree for %s...", filepath.Base(dirPath)))
+
+	// Show progress
+	g.progressBar.SetValue(0)
+	g.progressBar.Show()
+	g.progressLabel.SetText("Scanning files...")
+	g.progressLabel.Show()
+
+	go func() {
+		startTime := time.Now()
+		
+		// Collect all files recursively
+		var fileEntries []FileHashEntry
+		var totalFiles int
+		
+		err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() {
+				totalFiles++
+			}
+			return nil
+		})
+		
+		if err != nil {
+			g.showErrorAsync("Error scanning directory: " + err.Error())
+			return
+		}
+		
+		// Process files with progress
+		processedFiles := 0
+		err = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() {
+				// Get relative path
+				relPath, err := filepath.Rel(dirPath, path)
+				if err != nil {
+					relPath = path
+				}
+				
+				// Skip the merkle-tree.txt file itself if it exists
+				if relPath == "merkle-tree.txt" {
+					processedFiles++
+					return nil
+				}
+				
+				// Calculate RIPEMD-160 hash
+				hash, err := calculateRIPEMD160File(path)
+				if err != nil {
+					g.updateStatusAsync(fmt.Sprintf("Error hashing %s: %v", relPath, err))
+					return nil // Continue with other files
+				}
+				
+				fileEntries = append(fileEntries, FileHashEntry{
+					Path: relPath,
+					Hash: hash,
+				})
+				
+				processedFiles++
+				progress := float64(processedFiles) / float64(totalFiles)
+				fyne.Do(func() {
+					g.progressBar.SetValue(progress)
+					g.progressLabel.SetText(fmt.Sprintf("Hashing files: %d/%d (%.0f%%)", 
+						processedFiles, totalFiles, progress*100))
+				})
+			}
+			return nil
+		})
+		
+		if err != nil {
+			g.showErrorAsync("Error walking directory: " + err.Error())
+			return
+		}
+		
+		// Sort entries by path for consistent ordering
+		sort.Slice(fileEntries, func(i, j int) bool {
+			return fileEntries[i].Path < fileEntries[j].Path
+		})
+		
+		// Build Merkle tree to get root hash (nodes are not stored)
+		g.updateStatusAsync("Building Merkle tree...")
+		rootHash := buildMerkleTreeRoot(fileEntries)
+		
+		// Build output with CRLF line endings - ONLY FILE HASHES AND ROOT
+		var output strings.Builder
+		
+		// File hashes section
+		output.WriteString("--- FILE HASHES (RIPEMD-160) ---\r\n")
+		for _, entry := range fileEntries {
+			output.WriteString(fmt.Sprintf("%s: %s\r\n", entry.Path, entry.Hash))
+		}
+		output.WriteString("\r\n")
+		
+		// Root hash only - no intermediate nodes
+		output.WriteString("--- ROOT HASH (RIPEMD-160) ---\r\n")
+		output.WriteString(fmt.Sprintf("%s\r\n", rootHash))
+		
+		// Write to file
+		outputFile := filepath.Join(dirPath, "merkle-tree.txt")
+		err = os.WriteFile(outputFile, []byte(output.String()), 0644)
+		if err != nil {
+			g.showErrorAsync("Error writing Merkle tree file: " + err.Error())
+			return
+		}
+		
+		elapsedTime := time.Since(startTime).Seconds()
+		fyne.Do(func() {
+			g.progressBar.Hide()
+			g.progressLabel.Hide()
+			g.statusLabel.SetText(fmt.Sprintf("✓ Merkle tree created: %s (%.1f seconds, %d files)", 
+				"merkle-tree.txt", elapsedTime, len(fileEntries)))
+			g.sigDisplay.SetText("✓ merkle-tree.txt")
+		})
+	}()
+}
+
+// buildMerkleTreeRoot builds a Merkle tree and returns ONLY the root hash
+func buildMerkleTreeRoot(entries []FileHashEntry) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	
+	// Start with leaf hashes
+	var currentLevel []string
+	for _, entry := range entries {
+		currentLevel = append(currentLevel, entry.Hash)
+	}
+	
+	// Build tree bottom-up until we get the root
+	for len(currentLevel) > 1 {
+		var nextLevel []string
+		
+		for i := 0; i < len(currentLevel); i += 2 {
+			if i+1 < len(currentLevel) {
+				// Combine two nodes
+				combined := currentLevel[i] + currentLevel[i+1]
+				hash := calculateRIPEMD160(combined)
+				nextLevel = append(nextLevel, hash)
+			} else {
+				// Odd node, promote to next level
+				nextLevel = append(nextLevel, currentLevel[i])
+			}
+		}
+		
+		currentLevel = nextLevel
+	}
+	
+	// Root hash is the last remaining node
+	if len(currentLevel) == 1 {
+		return currentLevel[0]
+	}
+	
+	return ""
+}
+// onVerifyMerkleTree handles the Verify Merkle Tree button
+func (g *GUI) onVerifyMerkleTree() {
+	// Select directory containing merkle-tree.txt
+	g.selectDirectory(func(dirPath string) {
+		g.continueVerifyMerkleTree(dirPath)
+	})
+}
+
+// continueVerifyMerkleTree continues Merkle tree verification
+func (g *GUI) continueVerifyMerkleTree(dirPath string) {
+	// Check if merkle-tree.txt exists
+	merkleFilePath := filepath.Join(dirPath, "merkle-tree.txt")
+	merkleData, err := os.ReadFile(merkleFilePath)
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("merkle-tree.txt not found in selected directory"), g.window)
+		return
+	}
+	
+	g.statusLabel.SetText("Verifying Merkle tree...")
+	g.progressBar.SetValue(0)
+	g.progressBar.Show()
+	g.progressLabel.SetText("Parsing Merkle tree file...")
+	g.progressLabel.Show()
+	
+	go func() {
+		startTime := time.Now()
+		
+		// Parse the merkle-tree.txt file
+		content := string(merkleData)
+		lines := strings.Split(content, "\r\n")
+		
+		// Extract data
+		var fileHashes []FileHashEntry
+		var treeNodes []string
+		var rootHashFromFile string
+		
+		section := ""
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			
+			// Check for section headers
+			if line == "--- FILE HASHES (RIPEMD-160) ---" {
+				section = "file_hashes"
+				continue
+			} else if line == "--- MERKLE TREE NODES ---" {
+				section = "tree_nodes"
+				continue
+			} else if line == "--- ROOT HASH (RIPEMD-160) ---" {
+				section = "root_hash"
+				continue
+			}
+			
+			// Parse based on section
+			switch section {
+			case "file_hashes":
+				if strings.Contains(line, ":") {
+					parts := strings.SplitN(line, ":", 2)
+					if len(parts) == 2 {
+						filePath := strings.TrimSpace(parts[0])
+						fileHash := strings.TrimSpace(parts[1])
+						fileHashes = append(fileHashes, FileHashEntry{
+							Path: filePath,
+							Hash: fileHash,
+						})
+					}
+				}
+				
+			case "tree_nodes":
+				if strings.Contains(line, ":") {
+					parts := strings.SplitN(line, ":", 2)
+					if len(parts) == 2 {
+						treeNode := strings.TrimSpace(parts[1])
+						if len(treeNode) == 40 { // RIPEMD-160 is 40 hex chars
+							treeNodes = append(treeNodes, treeNode)
+						}
+					}
+				}
+				
+			case "root_hash":
+				if len(line) == 40 { // RIPEMD-160 is 40 hex chars
+					rootHashFromFile = line
+				}
+			}
+		}
+		
+		// Verify by recalculating hashes
+		g.updateStatusAsync("Recalculating file hashes...")
+		
+		var currentFileHashes []FileHashEntry
+		var totalFiles int
+		
+		// Count total files for progress (excluding merkle-tree.txt)
+		filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			if err == nil && !info.IsDir() {
+				relPath, _ := filepath.Rel(dirPath, path)
+				if relPath != "merkle-tree.txt" {
+					totalFiles++
+				}
+			}
+			return nil
+		})
+		
+		processedFiles := 0
+		err = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() {
+				// Get relative path
+				relPath, err := filepath.Rel(dirPath, path)
+				if err != nil {
+					relPath = path
+				}
+				
+				// Skip the merkle-tree.txt file itself
+				if relPath == "merkle-tree.txt" {
+					processedFiles++
+					return nil
+				}
+				
+				// Calculate RIPEMD-160 hash
+				hash, err := calculateRIPEMD160File(path)
+				if err != nil {
+					g.updateStatusAsync(fmt.Sprintf("Error hashing %s: %v", relPath, err))
+					return nil
+				}
+				
+				currentFileHashes = append(currentFileHashes, FileHashEntry{
+					Path: relPath,
+					Hash: hash,
+				})
+				
+				processedFiles++
+				progress := float64(processedFiles) / float64(totalFiles)
+				fyne.Do(func() {
+					g.progressBar.SetValue(progress)
+					g.progressLabel.SetText(fmt.Sprintf("Verifying: %d/%d (%.0f%%)", 
+						processedFiles, totalFiles, progress*100))
+				})
+			}
+			return nil
+		})
+		
+		if err != nil {
+			g.showErrorAsync("Error walking directory: " + err.Error())
+			return
+		}
+		
+		// Sort by path
+		sort.Slice(currentFileHashes, func(i, j int) bool {
+			return currentFileHashes[i].Path < currentFileHashes[j].Path
+		})
+		
+		// Compare file counts
+		if len(currentFileHashes) != len(fileHashes) {
+			fyne.Do(func() {
+				g.showErrorPopup(fmt.Sprintf("File count mismatch: expected %d, found %d", 
+					len(fileHashes), len(currentFileHashes)), nil)
+			})
+			return
+		}
+		
+		// Compare individual file hashes
+		hashMismatch := false
+		for i := 0; i < len(fileHashes); i++ {
+			if i >= len(currentFileHashes) {
+				hashMismatch = true
+				break
+			}
+			if fileHashes[i].Path != currentFileHashes[i].Path || 
+			   fileHashes[i].Hash != currentFileHashes[i].Hash {
+				hashMismatch = true
+				g.updateStatusAsync(fmt.Sprintf("Mismatch: %s", fileHashes[i].Path))
+				break
+			}
+		}
+		
+		if hashMismatch {
+			fyne.Do(func() {
+				g.showErrorPopup("File hash mismatch detected", nil)
+			})
+			return
+		}
+		
+		// Rebuild Merkle tree to verify root hash
+		g.updateStatusAsync("Rebuilding Merkle tree...")
+		calculatedRootHash, _ := buildMerkleTree(currentFileHashes)
+		
+		// Compare root hashes
+		if calculatedRootHash != rootHashFromFile {
+			fyne.Do(func() {
+				g.showErrorPopup(fmt.Sprintf("Root hash mismatch:\nExpected: %s\nCalculated: %s", 
+					rootHashFromFile, calculatedRootHash), nil)
+			})
+			return
+		}
+		
+		elapsedTime := time.Since(startTime).Seconds()
+		fyne.Do(func() {
+			g.progressBar.Hide()
+			g.progressLabel.Hide()
+			g.statusLabel.SetText(fmt.Sprintf("✓ Merkle tree verified successfully (%.1f seconds, %d files)", 
+				elapsedTime, len(currentFileHashes)))
+			
+			// Create a hash for identicon from root hash
+			hashBytes, _ := hex.DecodeString(calculatedRootHash)
+			hexString := hex.EncodeToString(hashBytes)
+                        hashForIdenticon := sha256.Sum256([]byte(hexString))
+                        g.showSuccessPopupWithIdenticon(hashForIdenticon[:])
+		})
+	}()
+}
+
+// calculateRIPEMD160File calculates RIPEMD-160 hash of a file
+func calculateRIPEMD160File(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	
+	hasher := ripemd.New160()
+	buf := make([]byte, 32*1024*1024) // 32MB buffer
+	
+	for {
+		n, err := file.Read(buf)
+		if n > 0 {
+			hasher.Write(buf[:n])
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+	
+	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+// buildMerkleTree builds a Merkle tree from file hash entries and returns root hash and all node hashes
+func buildMerkleTree(entries []FileHashEntry) (string, []string) {
+	if len(entries) == 0 {
+		return "", []string{}
+	}
+	
+	// Start with leaf hashes
+	var currentLevel []string
+	for _, entry := range entries {
+		currentLevel = append(currentLevel, entry.Hash)
+	}
+	
+	var allNodes []string
+	allNodes = append(allNodes, currentLevel...)
+	
+	// Build tree bottom-up
+	for len(currentLevel) > 1 {
+		var nextLevel []string
+		
+		for i := 0; i < len(currentLevel); i += 2 {
+			if i+1 < len(currentLevel) {
+				// Combine two nodes
+				combined := currentLevel[i] + currentLevel[i+1]
+				hash := calculateRIPEMD160(combined)
+				nextLevel = append(nextLevel, hash)
+				allNodes = append(allNodes, hash)
+			} else {
+				// Odd node, promote to next level
+				nextLevel = append(nextLevel, currentLevel[i])
+			}
+		}
+		
+		currentLevel = nextLevel
+	}
+	
+	// Root hash is the last remaining node
+	if len(currentLevel) == 1 {
+		return currentLevel[0], allNodes
+	}
+	
+	return "", allNodes
+}
+
+// calculateRIPEMD160 calculates RIPEMD-160 hash of a string
+func calculateRIPEMD160(data string) string {
+	hasher := ripemd.New160()
+	hasher.Write([]byte(data))
+	return hex.EncodeToString(hasher.Sum(nil))
+}
+
+// onSignClick - integrated file selection
 func (g *GUI) onSignClick() {
 	g.signingMode = true
+	
+	// If no file is selected, open file dialog first
+	if g.currentFile == "" {
+		g.selectFile(func() {
+			// After file is selected, proceed with signing
+			g.continueSign()
+		})
+		return
+	}
+	
+	g.continueSign()
+}
+
+// continueSign continues the signing process after file selection
+func (g *GUI) continueSign() {
 	if g.currentFile == "" {
 		g.statusLabel.SetText("Error: No file selected")
 		return
@@ -533,7 +1049,7 @@ func (g *GUI) onSignClick() {
 	if g.pinEntry.Text == "" {
 		g.showPinDialog("PIN required for signing", func(pin string) {
 			g.pinEntry.SetText(pin)
-			g.onSignClick()
+			g.continueSign()
 		})
 		return
 	}
@@ -736,9 +1252,24 @@ func (g *GUI) onSignClick() {
 	}
 }
 
-// onVerifyClick - verify with hybrid approach and proper synchronization
+// onVerifyClick - integrated file selection
 func (g *GUI) onVerifyClick() {
 	g.signingMode = false
+	
+	// If no file is selected, open file dialog first
+	if g.currentFile == "" {
+		g.selectFile(func() {
+			// After file is selected, proceed with verification
+			g.continueVerify()
+		})
+		return
+	}
+	
+	g.continueVerify()
+}
+
+// continueVerify continues the verification process after file selection
+func (g *GUI) continueVerify() {
 	if g.currentFile == "" {
 		g.statusLabel.SetText("Error: No file selected")
 		return
@@ -1075,13 +1606,13 @@ func (g *GUI) showSuccessPopupWithIdenticon(hash []byte) {
 	fyneImg := canvas.NewImageFromImage(img)
 	fyneImg.FillMode = canvas.ImageFillContain
 	fyneImg.SetMinSize(fyne.NewSize(128, 128))
-	successLabel := widget.NewLabel("Signature is valid")
+	successLabel := widget.NewLabel("Verification Successful")
 	successLabel.Alignment = fyne.TextAlignCenter
 	content := container.NewVBox(
 		container.NewCenter(fyneImg),
 		container.NewCenter(successLabel),
 	)
-	d := dialog.NewCustom("Verification Successful", "OK", content, g.window)
+	d := dialog.NewCustom("", "OK", content, g.window)
 	// Reset status after dialog closes
 	d.SetOnClosed(func() {
 		fyne.Do(func() {
